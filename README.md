@@ -91,6 +91,35 @@ integrity-checked and only then moved into place.
 | `restore <tag\|latest> -o PATH` | Restores a backup into a database file |
 | `healthcheck` | Exits 0 if the daemon is on schedule (used by the image's `HEALTHCHECK`) |
 
+## Configuration
+
+All settings are environment variables. Every variable except `HEALTH_FILE` also accepts a
+`<NAME>_FILE` variant that reads the value from a file (for Docker secrets).
+
+| Variable | Default | Description |
+|---|---|---|
+| `SQLITE_DB_PATHS` | required | Paths to the databases, comma-separated |
+| `GITHUB_REPO` | required | `name` or `owner/name`; without an owner the token's user is used |
+| `GH_TOKEN` | required | GitHub token (classic PAT with `repo` scope) |
+| `SCHEDULE` | `@daily` | Cron expression or `@hourly`, `@daily`, `@weekly`, `@monthly` |
+| `BACKUP_ON_START` | `false` | Make a backup right when the container starts |
+| `BACKUP_KEEP_DAYS` | `7` | Keep the last backup of each of the last N days |
+| `BACKUP_KEEP_WEEKS` | `4` | Keep the last backup of each of the last N weeks |
+| `BACKUP_KEEP_MONTHS` | `6` | Keep the last backup of each of the last N months |
+| `COMPRESSION` | `gzip` | `gzip`, `zstd` or `none` |
+| `AGE_RECIPIENT` | – | age public key; enables encryption of the backups |
+| `AGE_IDENTITY` | – | age private key; needed by `restore` for encrypted backups |
+| `WEBHOOK_URL` | – | `http(s)` URL that receives a JSON `POST` when a backup fails |
+| `TZ` | `UTC` | Timezone for `SCHEDULE` |
+| `HEALTH_FILE` | `/tmp/sqlite-repo-backuper.health` | Where the daemon records its health deadline |
+
+Notes:
+
+- The newest backup is never deleted, even if all `BACKUP_KEEP_*` are `0`.
+- The webhook payload is `{"status": "error", "message": "..."}`. For healthchecks.io use your
+  ping URL with `/fail` appended, otherwise the request counts as a successful ping.
+- The container becomes `unhealthy` if no backup succeeded for an hour past the expected time.
+
 ## Good to know
 
 - Retention keeps the **last** backup of each day, so several backups made on the same day
