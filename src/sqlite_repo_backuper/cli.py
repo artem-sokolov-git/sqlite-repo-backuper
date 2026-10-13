@@ -6,7 +6,7 @@ import sys
 import threading
 from pathlib import Path
 
-from .backup import backup_and_prune, list_backups, run_prune
+from .backup import backup_and_prune, list_backups, refresh_index, run_prune
 from .compress import CompressError, check_recipient
 from .config import ConfigError, load_config
 from .github import GitHub, GitHubError
@@ -48,8 +48,11 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "backup":
             backup_and_prune(config)
         elif args.command == "prune":
-            for tag in run_prune(config):
+            deleted = run_prune(config)
+            for tag in deleted:
                 print(f"deleted: {tag}")
+            if deleted:
+                refresh_index(config)
         elif args.command == "list":
             gh = GitHub(config.token)
             for backup in list_backups(gh, gh.resolve_repo(config.repo)):

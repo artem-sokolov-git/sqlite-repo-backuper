@@ -35,8 +35,9 @@ The tag is the single source of truth about when a backup was made:
 `retention.py` (`make_tag`/`parse_tag`) is used by the backup, prune, list and restore paths.
 Releases whose tag does not parse are ignored everywhere.
 
-Backup pipeline (`backup.py`): `ensure_repo` (creates a private repo with `--add-readme`, makes an
-initial commit in an empty one, refuses a public one) → `snapshot.py` (`sqlite3.backup()` API,
+Backup pipeline (`backup.py`): `ensure_repo` (creates an empty private repo and seeds it with the
+descriptive README from `readme.intro_text` as the first commit, since a release needs a tag and a
+tag needs a commit; seeds an existing empty repo the same way; refuses a public one) → `snapshot.py` (`sqlite3.backup()` API,
 WAL-safe, then `integrity_check`) → `compress.py` (gzip/zstd/none, then optional `age` via the
 `age` binary) → release is created as a **draft** and published only after all assets are
 uploaded. `run_prune` also deletes leftover `backup-*` drafts from interrupted runs.
@@ -46,6 +47,10 @@ Asset names encode how to undo the pipeline: `<db>-<stamp>[.gz|.zst][.age]`.
 release notes, decrypts (`AGE_IDENTITY`), decompresses to a temp file next to the target,
 runs `integrity_check` and only then `os.replace`s it. Changing the naming scheme breaks
 restore of existing backups.
+
+After each backup/prune `readme.py` rewrites only the marker-delimited block of the backup repo's
+`README.md` (via the contents API, one commit, skipped if unchanged). It must never overwrite
+other README content, because the repo may be user-owned; its failure is logged, not raised.
 
 Retention (`retention.py:select_to_delete`) is a pure function: keeps the last backup of each of
 the last N days/weeks/months that have backups; the newest is never deleted. Several backups on

@@ -11,6 +11,7 @@ Everything is automatic and configured through environment variables:
 - compresses it (gzip by default, zstd optional) and optionally encrypts it with [age](https://age-encryption.org);
 - publishes every backup as a GitHub Release, so deleting old backups really frees the space;
 - keeps the last backup of each of the last N days, weeks and months and deletes the rest;
+- maintains a list of backups with links in the backup repository's `README.md`;
 - restores a backup with a single command.
 
 ## Quick start
@@ -132,6 +133,10 @@ Notes:
 
 ## Good to know
 
+- The backup list in the repository's `README.md` lives between the `<!-- backups:start -->` and
+  `<!-- backups:end -->` markers and is rewritten after every backup (one small commit, skipped
+  when nothing changed). Everything outside the markers is left alone; if the markers are missing
+  the block is appended to the end. A failure to update it only logs a warning.
 - Retention keeps the **last** backup of each day, so several backups made on the same day
   collapse into one. Defaults: 7 days, 4 weeks, 6 months.
 - A private repository is not an encrypted one. For sensitive data set `AGE_RECIPIENT` to an age

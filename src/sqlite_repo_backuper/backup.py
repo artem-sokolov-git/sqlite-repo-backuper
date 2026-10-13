@@ -1,10 +1,12 @@
+import logging
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 
 from .compress import AGE_EXTENSION, EXTENSIONS, compress, encrypt
 from .config import Config
-from .github import GitHub
+from .github import GitHub, GitHubError
+from .readme import update_index
 from .retention import Backup, make_tag, parse_tag, select_to_delete
 from .snapshot import sha256, snapshot
 
@@ -40,6 +42,9 @@ def run_backup(config: Config) -> str:
     return f"{repo}@{tag}"
 
 
+log = logging.getLogger(__name__)
+
+
 def list_backups(gh: GitHub, repo: str) -> list[Backup]:
     """Published backups, newest first."""
     found = [
@@ -71,7 +76,17 @@ def run_prune(config: Config) -> list[str]:
     return deleted
 
 
+def refresh_index(config: Config) -> None:
+    """Update the backup list in the repo README; never fails a backup that already succeeded."""
+    gh = GitHub(config.token)
+    try:
+        update_index(gh, gh.resolve_repo(config.repo))
+    except GitHubError as e:
+        log.warning("could not update README backup list: %s", e)
+
+
 def backup_and_prune(config: Config) -> None:
     print(f"backup published: {run_backup(config)}", flush=True)
     for tag in run_prune(config):
         print(f"deleted: {tag}", flush=True)
+    refresh_index(config)
