@@ -4,6 +4,7 @@ from pathlib import Path
 
 from .config import Config
 from .github import GitHub
+from .retention import Backup, make_tag, parse_tag, select_to_delete
 from .snapshot import gzip_file, sha256, snapshot
 
 
@@ -13,8 +14,8 @@ def run_backup(config: Config) -> str:
     repo = gh.ensure_repo(config.repo)
 
     now = datetime.now(UTC)
-    stamp = now.strftime("%Y-%m-%dT%H-%M-%SZ")
-    tag = f"backup-{stamp}"
+    tag = make_tag(now)
+    stamp = tag.removeprefix("backup-")
 
     with tempfile.TemporaryDirectory() as tmp:
         tmp_dir = Path(tmp)
@@ -31,3 +32,34 @@ def run_backup(config: Config) -> str:
         gh.create_release(repo, tag, "\n".join(lines), assets)
 
     return f"{repo}@{tag}"
+
+
+def list_backups(gh: GitHub, repo: str) -> list[Backup]:
+    """Published backups, newest first."""
+    found = [
+        backup
+        for release in gh.list_releases(repo)
+        if not release["isDraft"] and (backup := parse_tag(release["tagName"]))
+    ]
+    return sorted(found, key=lambda b: b.created, reverse=True)
+
+
+def run_prune(config: Config) -> list[str]:
+    """Delete backups outside the retention policy and leftover drafts; return deleted tags."""
+    gh = GitHub(config.token)
+    repo = gh.resolve_repo(config.repo)
+
+    deleted = [
+        release["tagName"]
+        for release in gh.list_releases(repo)
+        if release["isDraft"] and parse_tag(release["tagName"])
+    ]
+    deleted += [
+        b.tag
+        for b in select_to_delete(
+            list_backups(gh, repo), config.keep_days, config.keep_weeks, config.keep_months
+        )
+    ]
+    for tag in deleted:
+        gh.delete_release(repo, tag)
+    return deleted

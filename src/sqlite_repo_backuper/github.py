@@ -48,6 +48,24 @@ class GitHub:
             "-f", "message=Initial commit", "-f", f"content={content}",
         )  # fmt: skip
 
+    def list_releases(self, full: str) -> list[dict]:
+        out = self._run(
+            "release", "list", "--repo", full, "--limit", "1000",
+            "--json", "tagName,isDraft",
+        ).stdout  # fmt: skip
+        return json.loads(out)
+
+    def delete_release(self, full: str, tag: str) -> None:
+        self._run("release", "delete", tag, "--repo", full, "--yes", "--cleanup-tag")
+
+    def release_notes(self, full: str, tag: str) -> str:
+        return self._run(
+            "release", "view", tag, "--repo", full, "--json", "body", "--jq", ".body"
+        ).stdout
+
+    def download_release(self, full: str, tag: str, dest: Path) -> None:
+        self._run("release", "download", tag, "--repo", full, "--dir", str(dest))
+
     def create_release(self, full: str, tag: str, notes: str, assets: list[Path]) -> None:
         """Upload as a draft and publish only when all assets are in place."""
         self._run(

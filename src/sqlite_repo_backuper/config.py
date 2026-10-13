@@ -13,6 +13,22 @@ class Config:
     db_paths: tuple[Path, ...]
     repo: str
     token: str
+    keep_days: int = 7
+    keep_weeks: int = 4
+    keep_months: int = 6
+
+
+def _get_int(env: Mapping[str, str], name: str, default: int) -> int:
+    raw = _get(env, name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        raise ConfigError(f"{name} must be an integer, got {raw!r}") from None
+    if value < 0:
+        raise ConfigError(f"{name} must be >= 0, got {value}")
+    return value
 
 
 def _get(env: Mapping[str, str], name: str) -> str | None:
@@ -52,4 +68,11 @@ def load_config(env: Mapping[str, str] | None = None) -> Config:
     if repo.count("/") > 1 or repo.startswith("/") or repo.endswith("/"):
         raise ConfigError(f"GITHUB_REPO must be 'name' or 'owner/name', got {repo!r}")
 
-    return Config(db_paths=db_paths, repo=repo, token=token)
+    return Config(
+        db_paths=db_paths,
+        repo=repo,
+        token=token,
+        keep_days=_get_int(env, "BACKUP_KEEP_DAYS", 7),
+        keep_weeks=_get_int(env, "BACKUP_KEEP_WEEKS", 4),
+        keep_months=_get_int(env, "BACKUP_KEEP_MONTHS", 6),
+    )

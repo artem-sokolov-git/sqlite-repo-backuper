@@ -26,17 +26,28 @@ def snapshot(source: Path, dest: Path) -> None:
     finally:
         src.close()
 
-    check = sqlite3.connect(dest)
+    check_integrity(dest)
+
+
+def check_integrity(path: Path) -> None:
+    conn = sqlite3.connect(path)
     try:
-        result = check.execute("PRAGMA integrity_check").fetchall()
+        result = conn.execute("PRAGMA integrity_check").fetchall()
+    except sqlite3.Error as e:
+        raise SnapshotError(f"{path} is not a valid database: {e}") from e
     finally:
-        check.close()
+        conn.close()
     if result != [("ok",)]:
-        raise SnapshotError(f"integrity_check failed for {source}: {result}")
+        raise SnapshotError(f"integrity_check failed for {path}: {result}")
 
 
 def gzip_file(source: Path, dest: Path) -> None:
     with source.open("rb") as f_in, gzip.open(dest, "wb") as f_out:
+        shutil.copyfileobj(f_in, f_out)
+
+
+def gunzip_file(source: Path, dest: Path) -> None:
+    with gzip.open(source, "rb") as f_in, dest.open("wb") as f_out:
         shutil.copyfileobj(f_in, f_out)
 
 
