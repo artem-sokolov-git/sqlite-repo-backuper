@@ -54,3 +54,26 @@ def test_invalid_values(name, value):
     env = {"SQLITE_DB_PATHS": "/a.db", "GITHUB_REPO": "r", "GH_TOKEN": "t", name: value}
     with pytest.raises(ConfigError, match=name):
         load_config(env)
+
+
+def test_compression_and_webhook_options():
+    base = {"SQLITE_DB_PATHS": "/a.db", "GITHUB_REPO": "r", "GH_TOKEN": "t"}
+    cfg = load_config(base)
+    assert (cfg.compression, cfg.age_recipient, cfg.webhook_url) == ("gzip", None, None)
+    cfg = load_config(
+        {**base, "COMPRESSION": "ZSTD", "AGE_RECIPIENT": "age1abc", "WEBHOOK_URL": "https://h/x"}
+    )
+    assert (cfg.compression, cfg.age_recipient, cfg.webhook_url) == (
+        "zstd",
+        "age1abc",
+        "https://h/x",
+    )
+
+
+@pytest.mark.parametrize(
+    ("name", "value"), [("COMPRESSION", "lz4"), ("WEBHOOK_URL", "file:///etc/passwd")]
+)
+def test_invalid_compression_and_webhook(name, value):
+    env = {"SQLITE_DB_PATHS": "/a.db", "GITHUB_REPO": "r", "GH_TOKEN": "t", name: value}
+    with pytest.raises(ConfigError, match=name):
+        load_config(env)

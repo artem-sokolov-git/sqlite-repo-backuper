@@ -1,6 +1,4 @@
-import gzip
 import hashlib
-import shutil
 import sqlite3
 from pathlib import Path
 
@@ -39,16 +37,6 @@ def check_integrity(path: Path) -> None:
         conn.close()
     if result != [("ok",)]:
         raise SnapshotError(f"integrity_check failed for {path}: {result}")
-
-
-def gzip_file(source: Path, dest: Path) -> None:
-    with source.open("rb") as f_in, gzip.open(dest, "wb") as f_out:
-        shutil.copyfileobj(f_in, f_out)
-
-
-def gunzip_file(source: Path, dest: Path) -> None:
-    with gzip.open(source, "rb") as f_in, dest.open("wb") as f_out:
-        shutil.copyfileobj(f_in, f_out)
 
 
 def sha256(path: Path) -> str:

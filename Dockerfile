@@ -17,8 +17,24 @@ RUN set -eux; \
     tar -xzf "$tarball"; \
     mv "gh_${GH_VERSION}_linux_${TARGETARCH}/bin/gh" /gh
 
+FROM alpine:3.22 AS age
+ARG AGE_VERSION=1.3.2
+ARG TARGETARCH
+# age publishes no checksum file, so the release tarballs are pinned here
+RUN set -eux; \
+    case "$TARGETARCH" in \
+        amd64) sha=cbe24006683f8eb669266162894b9a522a1af52f2665fbc63a4bb032ed26ac10 ;; \
+        arm64) sha=6b8dc4333c53a5a57c9e5834e3a48f92605d7154014cd07269ff3327db5d37f4 ;; \
+        *) echo "unsupported arch $TARGETARCH"; exit 1 ;; \
+    esac; \
+    tarball="age-v${AGE_VERSION}-linux-${TARGETARCH}.tar.gz"; \
+    wget -q "https://github.com/FiloSottile/age/releases/download/v${AGE_VERSION}/$tarball"; \
+    echo "$sha  $tarball" | sha256sum -c -; \
+    tar -xzf "$tarball"
+
 FROM python:3.13-slim
 COPY --from=gh /gh /usr/local/bin/gh
+COPY --from=age /age/age /age/age-keygen /usr/local/bin/
 COPY --from=builder /app/.venv /app/.venv
 RUN useradd --create-home --uid 1000 backuper
 

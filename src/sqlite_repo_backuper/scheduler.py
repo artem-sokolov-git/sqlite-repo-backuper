@@ -7,6 +7,7 @@ from croniter import croniter
 
 from .config import Config
 from .health import write_deadline
+from .notify import notify_failure
 
 log = logging.getLogger(__name__)
 
@@ -38,8 +39,10 @@ def run_daemon(
     def execute() -> bool:
         try:
             job(config)
-        except Exception:
+        except Exception as e:
             log.exception("backup failed")
+            if config.webhook_url:
+                notify_failure(config.webhook_url, f"sqlite-repo-backuper: backup failed: {e}")
             return False
         return True
 

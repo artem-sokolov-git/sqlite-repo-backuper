@@ -7,6 +7,7 @@ import threading
 from pathlib import Path
 
 from .backup import backup_and_prune, list_backups, run_prune
+from .compress import CompressError, check_recipient
 from .config import ConfigError, load_config
 from .github import GitHub, GitHubError
 from .health import health_path, is_healthy
@@ -37,6 +38,8 @@ def main(argv: list[str] | None = None) -> int:
         config = load_config()
         if args.command == "run":
             logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+            if config.age_recipient:
+                check_recipient(config.age_recipient)
             GitHub(config.token).ensure_repo(config.repo)
             stop = threading.Event()
             for sig in (signal.SIGTERM, signal.SIGINT):
@@ -54,7 +57,7 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "restore":
             tag = run_restore(config, args.target, args.output, args.db, args.force)
             print(f"restored {tag} to {args.output}")
-    except (ConfigError, GitHubError, SnapshotError, RestoreError) as e:
+    except (ConfigError, GitHubError, SnapshotError, CompressError, RestoreError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
     return 0

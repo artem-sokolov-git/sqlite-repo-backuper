@@ -1,9 +1,8 @@
-import gzip
 import sqlite3
 
 import pytest
 
-from sqlite_repo_backuper.snapshot import SnapshotError, gzip_file, snapshot
+from sqlite_repo_backuper.snapshot import SnapshotError, snapshot
 
 
 def test_snapshot_wal_database(tmp_path):
@@ -26,10 +25,3 @@ def test_snapshot_wal_database(tmp_path):
 def test_snapshot_missing_source(tmp_path):
     with pytest.raises(SnapshotError, match="not found"):
         snapshot(tmp_path / "nope.db", tmp_path / "out.db")
-
-
-def test_gzip_roundtrip(tmp_path):
-    src = tmp_path / "f"
-    src.write_bytes(b"hello" * 1000)
-    gzip_file(src, tmp_path / "f.gz")
-    assert gzip.open(tmp_path / "f.gz").read() == b"hello" * 1000

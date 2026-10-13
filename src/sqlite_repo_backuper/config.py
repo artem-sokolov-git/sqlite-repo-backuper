@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from croniter import croniter
 
+from .compress import COMPRESSIONS
 from .health import health_path
 
 
@@ -26,6 +27,10 @@ class Config:
     backup_on_start: bool = False
     timezone: tzinfo = field(default_factory=lambda: ZoneInfo("UTC"))
     health_file: Path = field(default_factory=lambda: health_path({}))
+    compression: str = "gzip"
+    age_recipient: str | None = None
+    age_identity: str | None = None
+    webhook_url: str | None = None
 
 
 def _get_int(env: Mapping[str, str], name: str, default: int) -> int:
@@ -98,6 +103,15 @@ def load_config(env: Mapping[str, str] | None = None) -> Config:
     except (ZoneInfoNotFoundError, ValueError):
         raise ConfigError(f"unknown TZ: {tz_name!r}") from None
 
+    compression = (_get(env, "COMPRESSION") or "gzip").lower()
+    if compression not in COMPRESSIONS:
+        raise ConfigError(
+            f"COMPRESSION must be one of {', '.join(COMPRESSIONS)}, got {compression!r}"
+        )
+    webhook_url = _get(env, "WEBHOOK_URL")
+    if webhook_url and not webhook_url.startswith(("http://", "https://")):
+        raise ConfigError("WEBHOOK_URL must be an http(s) URL")
+
     return Config(
         db_paths=db_paths,
         repo=repo,
@@ -109,4 +123,8 @@ def load_config(env: Mapping[str, str] | None = None) -> Config:
         backup_on_start=_get_bool(env, "BACKUP_ON_START", False),
         timezone=timezone,
         health_file=health_path(env),
+        compression=compression,
+        age_recipient=_get(env, "AGE_RECIPIENT"),
+        age_identity=_get(env, "AGE_IDENTITY"),
+        webhook_url=webhook_url,
     )

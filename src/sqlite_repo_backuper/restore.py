@@ -4,9 +4,10 @@ import tempfile
 from pathlib import Path
 
 from .backup import list_backups
+from .compress import CompressError, decompress, decrypt, parse_asset_name
 from .config import Config
 from .github import GitHub
-from .snapshot import SnapshotError, check_integrity, gunzip_file, sha256
+from .snapshot import SnapshotError, check_integrity, sha256
 
 
 class RestoreError(Exception):
@@ -19,9 +20,9 @@ def _pick_asset(assets: list[Path], tag: str, db: str | None) -> Path:
             names = ", ".join(a.name for a in assets)
             raise RestoreError(f"{tag} has several databases, choose one with --db: {names}")
         return assets[0]
-    suffix = "-" + tag.removeprefix("backup-") + ".gz"
+    wanted = f"{db}-{tag.removeprefix('backup-')}"
     for asset in assets:
-        if asset.name == db + suffix:
+        if parse_asset_name(asset.name)[0] == wanted:
             return asset
     raise RestoreError(f"no database named {db!r} in {tag}")
 
@@ -47,7 +48,7 @@ def run_restore(
     with tempfile.TemporaryDirectory() as tmp:
         tmp_dir = Path(tmp)
         gh.download_release(repo, tag, tmp_dir)
-        asset = _pick_asset(sorted(tmp_dir.glob("*.gz")), tag, db)
+        asset = _pick_asset(sorted(p for p in tmp_dir.iterdir() if p.is_file()), tag, db)
 
         expected = re.search(
             rf"`{re.escape(asset.name)}`: `([0-9a-f]{{64}})`", gh.release_notes(repo, tag)
@@ -55,15 +56,26 @@ def run_restore(
         if expected and expected.group(1) != sha256(asset):
             raise RestoreError(f"sha256 mismatch for {asset.name}")
 
+        _, compression, encrypted = parse_asset_name(asset.name)
+        payload = asset
+        if encrypted:
+            if not config.age_identity:
+                raise RestoreError(f"{asset.name} is encrypted, set AGE_IDENTITY(_FILE)")
+            identity = tmp_dir / "identity.key"
+            identity.touch(mode=0o600)
+            identity.write_text(config.age_identity.strip() + "\n")
+            payload = tmp_dir / "decrypted"
+            decrypt(asset, payload, identity)
+
         staged = output.parent / f".{output.name}.restore"
         try:
-            gunzip_file(asset, staged)
+            decompress(payload, staged, compression)
             check_integrity(staged)
             # a stale WAL from the replaced database would corrupt the restored one
             for suffix in ("-wal", "-shm"):
                 Path(f"{output}{suffix}").unlink(missing_ok=True)
             os.replace(staged, output)
-        except (SnapshotError, OSError):
+        except (SnapshotError, CompressError, OSError):
             staged.unlink(missing_ok=True)
             raise
     return tag

@@ -2,10 +2,11 @@ import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 
+from .compress import AGE_EXTENSION, EXTENSIONS, compress, encrypt
 from .config import Config
 from .github import GitHub
 from .retention import Backup, make_tag, parse_tag, select_to_delete
-from .snapshot import gzip_file, sha256, snapshot
+from .snapshot import sha256, snapshot
 
 
 def run_backup(config: Config) -> str:
@@ -24,9 +25,14 @@ def run_backup(config: Config) -> str:
         for db in config.db_paths:
             raw = tmp_dir / f"{db.name}.snapshot"
             snapshot(db, raw)
-            asset = tmp_dir / f"{db.name}-{stamp}.gz"
-            gzip_file(raw, asset)
+            asset = tmp_dir / f"{db.name}-{stamp}{EXTENSIONS[config.compression]}"
+            compress(raw, asset, config.compression)
             raw.unlink()
+            if config.age_recipient:
+                encrypted = asset.with_name(asset.name + AGE_EXTENSION)
+                encrypt(asset, encrypted, config.age_recipient)
+                asset.unlink()
+                asset = encrypted
             assets.append(asset)
             lines.append(f"- `{asset.name}`: `{sha256(asset)}`")
         gh.create_release(repo, tag, "\n".join(lines), assets)
