@@ -1,0 +1,33 @@
+services:
+  app:
+    image: your-app:latest
+    volumes:
+      - app-data:/data
+
+  sqlite-backup:
+    image: ghcr.io/OWNER/sqlite-repo-backuper:latest
+    restart: unless-stopped
+    # must match the uid that owns the database files (the volume is mounted read-write:
+    # SQLite needs access to the -wal/-shm files)
+    user: "1000:1000"
+    volumes:
+      - app-data:/data
+    environment:
+      SQLITE_DB_PATHS: /data/app.db       # comma-separated for several databases
+      GITHUB_REPO: app-backups            # or owner/name; created as private if missing
+      GH_TOKEN_FILE: /run/secrets/gh_token
+      SCHEDULE: "0 3 * * *"
+      BACKUP_ON_START: "true"
+      BACKUP_KEEP_DAYS: 7
+      BACKUP_KEEP_WEEKS: 4
+      BACKUP_KEEP_MONTHS: 6
+      TZ: UTC
+    secrets:
+      - gh_token
+
+secrets:
+  gh_token:
+    file: ./gh_token.txt
+
+volumes:
+  app-data:
