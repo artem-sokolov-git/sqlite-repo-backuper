@@ -15,12 +15,22 @@ Everything is automatic and configured through environment variables:
 
 ## Quick start
 
-**1. Create a token.** A classic personal access token with the `repo` scope. It is needed to
-create the repository, upload releases and delete old ones. Save it to a file next to your
-`docker-compose.yml`:
+**1. Create a token.** The container needs to create the repository, upload releases and delete
+old ones. Either of these works:
+
+- a **classic** personal access token with the `repo` scope; or
+- a **fine-grained** token with *Repository access: All repositories* and the repository
+  permissions *Administration: Read and write* and *Contents: Read and write*.
+
+If you create the repository yourself beforehand, a fine-grained token limited to that single
+repository with only *Contents: Read and write* is enough. Such a token cannot create
+repositories, so the container fails with `Resource not accessible by personal access token`
+when the repository does not exist.
+
+Save the token to a file next to your `docker-compose.yml`:
 
 ```sh
-echo "ghp_xxx" > gh_token.txt
+echo "<your token>" > gh_token.txt
 chmod 600 gh_token.txt
 ```
 
@@ -100,7 +110,7 @@ All settings are environment variables. Every variable except `HEALTH_FILE` also
 |---|---|---|
 | `SQLITE_DB_PATHS` | required | Paths to the databases, comma-separated |
 | `GITHUB_REPO` | required | `name` or `owner/name`; without an owner the token's user is used |
-| `GH_TOKEN` | required | GitHub token (classic PAT with `repo` scope) |
+| `GH_TOKEN` | required | GitHub token, see [Quick start](#quick-start) for the required permissions |
 | `SCHEDULE` | `@daily` | Cron expression or `@hourly`, `@daily`, `@weekly`, `@monthly` |
 | `BACKUP_ON_START` | `false` | Make a backup right when the container starts |
 | `BACKUP_KEEP_DAYS` | `7` | Keep the last backup of each of the last N days |
