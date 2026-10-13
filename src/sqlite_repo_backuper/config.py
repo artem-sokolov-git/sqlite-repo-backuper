@@ -1,7 +1,13 @@
 import os
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import tzinfo
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+from croniter import croniter
+
+from .health import health_path
 
 
 class ConfigError(Exception):
@@ -16,6 +22,10 @@ class Config:
     keep_days: int = 7
     keep_weeks: int = 4
     keep_months: int = 6
+    schedule: str = "@daily"
+    backup_on_start: bool = False
+    timezone: tzinfo = field(default_factory=lambda: ZoneInfo("UTC"))
+    health_file: Path = field(default_factory=lambda: health_path({}))
 
 
 def _get_int(env: Mapping[str, str], name: str, default: int) -> int:
@@ -29,6 +39,17 @@ def _get_int(env: Mapping[str, str], name: str, default: int) -> int:
     if value < 0:
         raise ConfigError(f"{name} must be >= 0, got {value}")
     return value
+
+
+def _get_bool(env: Mapping[str, str], name: str, default: bool) -> bool:
+    raw = _get(env, name)
+    if raw is None:
+        return default
+    if raw.lower() in ("1", "true", "yes", "on"):
+        return True
+    if raw.lower() in ("0", "false", "no", "off"):
+        return False
+    raise ConfigError(f"{name} must be true or false, got {raw!r}")
 
 
 def _get(env: Mapping[str, str], name: str) -> str | None:
@@ -68,6 +89,15 @@ def load_config(env: Mapping[str, str] | None = None) -> Config:
     if repo.count("/") > 1 or repo.startswith("/") or repo.endswith("/"):
         raise ConfigError(f"GITHUB_REPO must be 'name' or 'owner/name', got {repo!r}")
 
+    schedule = _get(env, "SCHEDULE") or "@daily"
+    if not croniter.is_valid(schedule):
+        raise ConfigError(f"SCHEDULE is not a valid cron expression: {schedule!r}")
+    tz_name = _get(env, "TZ") or "UTC"
+    try:
+        timezone = ZoneInfo(tz_name)
+    except (ZoneInfoNotFoundError, ValueError):
+        raise ConfigError(f"unknown TZ: {tz_name!r}") from None
+
     return Config(
         db_paths=db_paths,
         repo=repo,
@@ -75,4 +105,8 @@ def load_config(env: Mapping[str, str] | None = None) -> Config:
         keep_days=_get_int(env, "BACKUP_KEEP_DAYS", 7),
         keep_weeks=_get_int(env, "BACKUP_KEEP_WEEKS", 4),
         keep_months=_get_int(env, "BACKUP_KEEP_MONTHS", 6),
+        schedule=schedule,
+        backup_on_start=_get_bool(env, "BACKUP_ON_START", False),
+        timezone=timezone,
+        health_file=health_path(env),
     )

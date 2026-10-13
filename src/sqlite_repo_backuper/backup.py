@@ -63,3 +63,9 @@ def run_prune(config: Config) -> list[str]:
     for tag in deleted:
         gh.delete_release(repo, tag)
     return deleted
+
+
+def backup_and_prune(config: Config) -> None:
+    print(f"backup published: {run_backup(config)}", flush=True)
+    for tag in run_prune(config):
+        print(f"deleted: {tag}", flush=True)

@@ -4,7 +4,10 @@ version = "0.1.0"
 description = "Scheduled SQLite backups to a private GitHub repository"
 readme = "README.md"
 requires-python = ">=3.13"
-dependencies = []
+dependencies = [
+    "croniter>=6.2.4",
+    "tzdata>=2026.5",
+]
 
 [project.scripts]
 sqlite-repo-backuper = "sqlite_repo_backuper.cli:main"

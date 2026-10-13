@@ -31,3 +31,26 @@ def test_missing_required():
 def test_bad_repo():
     with pytest.raises(ConfigError, match="GITHUB_REPO"):
         load_config({"SQLITE_DB_PATHS": "/a.db", "GITHUB_REPO": "a/b/c", "GH_TOKEN": "t"})
+
+
+def test_schedule_defaults_and_overrides():
+    base = {"SQLITE_DB_PATHS": "/a.db", "GITHUB_REPO": "r", "GH_TOKEN": "t"}
+    cfg = load_config(base)
+    assert (cfg.schedule, cfg.backup_on_start, cfg.keep_days) == ("@daily", False, 7)
+    cfg = load_config(
+        {**base, "SCHEDULE": "0 3 * * *", "BACKUP_ON_START": "true", "TZ": "Europe/Berlin"}
+    )
+    assert cfg.schedule == "0 3 * * *"
+    assert cfg.backup_on_start is True
+    assert str(cfg.timezone) == "Europe/Berlin"
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [("SCHEDULE", "bogus"), ("TZ", "Mars/Base"), ("BACKUP_ON_START", "maybe"),
+     ("BACKUP_KEEP_DAYS", "-1")],
+)  # fmt: skip
+def test_invalid_values(name, value):
+    env = {"SQLITE_DB_PATHS": "/a.db", "GITHUB_REPO": "r", "GH_TOKEN": "t", name: value}
+    with pytest.raises(ConfigError, match=name):
+        load_config(env)
