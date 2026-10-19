@@ -63,8 +63,9 @@ health file stores a deadline (next run + 1h) and is advanced only after a succe
 
 ## Testing notes
 
-- Tests never talk to GitHub. `github.py`, `ensure_repo` and the release flow are verified only
-  manually against a real private repo; do that after touching them.
+- Tests never talk to GitHub. `tests/test_github.py` fakes `subprocess.run` to check the `gh`
+  arguments, but the real API behaviour of `github.py`, `ensure_repo` and the release flow is
+  verified only manually against a real private repo; do that after touching them.
 - `age`-dependent tests are skipped when the `age` binary is not installed locally.
 - A token scoped to a single repository cannot create repositories (`Resource not accessible by
   personal access token`); auto-create needs a classic `repo` PAT or a fine-grained token with

@@ -16,8 +16,12 @@ class GitHub:
     def __init__(self, token: str):
         self._env = {**os.environ, "GH_TOKEN": token, "GH_PROMPT_DISABLED": "1"}
 
-    def _run(self, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
-        proc = subprocess.run(["gh", *args], env=self._env, capture_output=True, text=True)
+    def _run(
+        self, *args: str, check: bool = True, stdin: str | None = None
+    ) -> subprocess.CompletedProcess[str]:
+        proc = subprocess.run(
+            ["gh", *args], env=self._env, capture_output=True, text=True, input=stdin
+        )
         if check and proc.returncode != 0:
             raise GitHubError(f"gh {' '.join(args[:3])} failed: {proc.stderr.strip()}")
         return proc
@@ -52,10 +56,13 @@ class GitHub:
             try:
                 self.write_file(full, "README.md", text, "Initial commit")
                 return
-            except GitHubError:
-                if attempt == 2:
+            except GitHubError as e:
+                if attempt == 2 or "HTTP 401" in str(e) or "HTTP 403" in str(e):
                     raise
                 time.sleep(2)  # a just-created repository is occasionally not writable yet
+                # the failed attempt may have been applied on the server
+                if self.read_file(full, "README.md") is not None:
+                    return
 
     def list_releases(self, full: str) -> list[dict]:
         out = self._run(
@@ -79,19 +86,25 @@ class GitHub:
                 return None
             raise GitHubError(f"gh api contents/{path} failed: {proc.stderr.strip()}")
         data = json.loads(proc.stdout)
-        return base64.b64decode(data["content"]).decode(), data["sha"]
+        if data.get("encoding") == "base64":
+            return base64.b64decode(data["content"]).decode(), data["sha"]
+        # files over 1 MB come without content; an empty text here would wipe the file
+        raw = self._run(
+            "api", "-H", "Accept: application/vnd.github.raw", f"repos/{full}/contents/{path}"
+        ).stdout
+        return raw, data["sha"]
 
     def write_file(
         self, full: str, path: str, text: str, message: str, sha: str | None = None
     ) -> None:
-        args = [
-            "api", "-X", "PUT", f"repos/{full}/contents/{path}",
-            "-f", f"message={message}",
-            "-f", f"content={base64.b64encode(text.encode()).decode()}",
-        ]  # fmt: skip
+        body = {"message": message, "content": base64.b64encode(text.encode()).decode()}
         if sha:
-            args += ["-f", f"sha={sha}"]
-        self._run(*args)
+            body["sha"] = sha
+        # via stdin: Linux caps a single command-line argument at 128 KB
+        self._run(
+            "api", "-X", "PUT", f"repos/{full}/contents/{path}", "--input", "-",
+            stdin=json.dumps(body),
+        )  # fmt: skip
 
     def delete_release(self, full: str, tag: str) -> None:
         self._run("release", "delete", tag, "--repo", full, "--yes", "--cleanup-tag")

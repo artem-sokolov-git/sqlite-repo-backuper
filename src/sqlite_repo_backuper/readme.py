@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING
 
 from .retention import parse_tag
@@ -10,6 +11,7 @@ if TYPE_CHECKING:
 START = "<!-- backups:start -->"
 END = "<!-- backups:end -->"
 README = "README.md"
+_BLOCK = re.compile(rf"^{re.escape(START)}[ \t]*$.*?^{re.escape(END)}[ \t]*$", re.M | re.S)
 
 
 def intro_text(name: str) -> str:
@@ -87,10 +89,14 @@ def render_section(releases: list[dict]) -> str:
 
 
 def apply_section(existing: str, section: str) -> str:
-    """Replace the managed block, or append it; everything else is left untouched."""
-    start, end = existing.find(START), existing.find(END)
-    if start != -1 and end > start:
-        return existing[:start] + section + existing[end + len(END) :]
+    """Replace the managed block, or append it; everything else is left untouched.
+
+    Markers count only on a line of their own, so a README that mentions them in prose
+    (e.g. `<!-- backups:end -->` in backticks) does not get a new block on every run.
+    """
+    block = _BLOCK.search(existing)
+    if block:
+        return existing[: block.start()] + section + existing[block.end() :]
     if not existing.strip():
         return section + "\n"
     return existing.rstrip("\n") + "\n\n" + section + "\n"

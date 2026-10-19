@@ -12,7 +12,8 @@ def snapshot(source: Path, dest: Path) -> None:
     if not source.is_file():
         raise SnapshotError(f"database not found: {source}")
 
-    src = sqlite3.connect(f"file:{source}?mode=ro", uri=True)
+    # as_uri() percent-encodes '#', '?' and '%', which would otherwise end the path early
+    src = sqlite3.connect(f"{source.resolve().as_uri()}?mode=ro", uri=True)
     try:
         dst = sqlite3.connect(dest)
         try:

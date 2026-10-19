@@ -77,3 +77,8 @@ def test_invalid_compression_and_webhook(name, value):
     env = {"SQLITE_DB_PATHS": "/a.db", "GITHUB_REPO": "r", "GH_TOKEN": "t", name: value}
     with pytest.raises(ConfigError, match=name):
         load_config(env)
+
+
+def test_duplicate_database_names_rejected():
+    with pytest.raises(ConfigError, match="several files named app.db"):
+        load_config({"SQLITE_DB_PATHS": "/a/app.db,/b/app.db", "GITHUB_REPO": "r", "GH_TOKEN": "t"})

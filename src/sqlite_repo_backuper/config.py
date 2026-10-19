@@ -91,6 +91,10 @@ def load_config(env: Mapping[str, str] | None = None) -> Config:
     db_paths = tuple(Path(p.strip()) for p in raw_paths.split(",") if p.strip())
     if not db_paths:
         raise ConfigError("SQLITE_DB_PATHS is empty")
+    names = [p.name for p in db_paths]
+    if duplicates := sorted({n for n in names if names.count(n) > 1}):
+        # the file name becomes the release asset name, so it must be unique
+        raise ConfigError(f"SQLITE_DB_PATHS has several files named {', '.join(duplicates)}")
     if repo.count("/") > 1 or repo.startswith("/") or repo.endswith("/"):
         raise ConfigError(f"GITHUB_REPO must be 'name' or 'owner/name', got {repo!r}")
 

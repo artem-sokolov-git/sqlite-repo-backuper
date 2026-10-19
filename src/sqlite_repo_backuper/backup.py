@@ -5,7 +5,7 @@ from pathlib import Path
 
 from .compress import AGE_EXTENSION, EXTENSIONS, compress, encrypt
 from .config import Config
-from .github import GitHub, GitHubError
+from .github import GitHub
 from .readme import update_index
 from .retention import Backup, make_tag, parse_tag, select_to_delete
 from .snapshot import sha256, snapshot
@@ -81,7 +81,7 @@ def refresh_index(config: Config) -> None:
     gh = GitHub(config.token)
     try:
         update_index(gh, gh.resolve_repo(config.repo))
-    except GitHubError as e:
+    except Exception as e:  # the backup is already published, the README is cosmetic
         log.warning("could not update README backup list: %s", e)
 
 

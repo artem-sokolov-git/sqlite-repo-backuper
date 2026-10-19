@@ -45,6 +45,22 @@ def test_apply_section_replaces_only_managed_block():
     assert apply_section(new, f"{START}\nnew\n{END}") == new
 
 
+def test_apply_section_ignores_markers_in_prose():
+    readme = f"Docs: the list ends with `{END}`, starts with `{START}`.\n\n{START}\nold\n{END}\n"
+    section = f"{START}\nnew\n{END}"
+    once = apply_section(readme, section)
+    assert once == f"Docs: the list ends with `{END}`, starts with `{START}`.\n\n{section}\n"
+    assert apply_section(once, section) == once
+
+
+def test_apply_section_appends_when_markers_only_in_prose():
+    readme = f"Mentions `{END}` and `{START}` inline.\n"
+    section = f"{START}\nnew\n{END}"
+    once = apply_section(readme, section)
+    assert once == f"{readme}\n{section}\n"
+    assert apply_section(once, section) == once
+
+
 class FakeGitHub:
     def __init__(self, readme):
         self.readme = readme
