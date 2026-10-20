@@ -45,14 +45,18 @@ def run_backup(config: Config) -> str:
 log = logging.getLogger(__name__)
 
 
-def list_backups(gh: GitHub, repo: str) -> list[Backup]:
-    """Published backups, newest first."""
+def _backups(releases: list[dict]) -> list[Backup]:
     found = [
         backup
-        for release in gh.list_releases(repo)
-        if not release["isDraft"] and (backup := parse_tag(release["tagName"]))
+        for release in releases
+        if not release["draft"] and (backup := parse_tag(release["tag_name"]))
     ]
     return sorted(found, key=lambda b: b.created, reverse=True)
+
+
+def list_backups(gh: GitHub, repo: str) -> list[Backup]:
+    """Published backups, newest first."""
+    return _backups(gh.list_releases(repo))
 
 
 def run_prune(config: Config) -> list[str]:
@@ -60,20 +64,18 @@ def run_prune(config: Config) -> list[str]:
     gh = GitHub(config.token)
     repo = gh.resolve_repo(config.repo)
 
-    deleted = [
-        release["tagName"]
-        for release in gh.list_releases(repo)
-        if release["isDraft"] and parse_tag(release["tagName"])
-    ]
-    deleted += [
-        b.tag
+    releases = gh.list_releases(repo)
+    doomed = [r for r in releases if r["draft"] and parse_tag(r["tag_name"])]
+    published = {r["tag_name"]: r for r in releases if not r["draft"]}
+    doomed += [
+        published[b.tag]
         for b in select_to_delete(
-            list_backups(gh, repo), config.keep_days, config.keep_weeks, config.keep_months
+            _backups(releases), config.keep_days, config.keep_weeks, config.keep_months
         )
     ]
-    for tag in deleted:
-        gh.delete_release(repo, tag)
-    return deleted
+    for release in doomed:
+        gh.delete_release(repo, release)
+    return [r["tag_name"] for r in doomed]
 
 
 def refresh_index(config: Config) -> None:

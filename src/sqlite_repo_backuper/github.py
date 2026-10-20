@@ -1,33 +1,65 @@
 import base64
-import json
-import os
-import subprocess
 import time
 from pathlib import Path
 
+import httpx
+
 from .readme import intro_text
+
+API = "https://api.github.com"
 
 
 class GitHubError(Exception):
-    pass
+    def __init__(self, message: str, status: int | None = None):
+        super().__init__(message)
+        self.status = status
 
 
 class GitHub:
-    def __init__(self, token: str):
-        self._env = {**os.environ, "GH_TOKEN": token, "GH_PROMPT_DISABLED": "1"}
-
-    def _run(
-        self, *args: str, check: bool = True, stdin: str | None = None
-    ) -> subprocess.CompletedProcess[str]:
-        proc = subprocess.run(
-            ["gh", *args], env=self._env, capture_output=True, text=True, input=stdin
+    def __init__(self, token: str, transport: httpx.BaseTransport | None = None):
+        self._http = httpx.Client(
+            base_url=API,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+            # assets go to S3 via a redirect; httpx drops the token for another origin
+            follow_redirects=True,
+            timeout=httpx.Timeout(60.0),
+            transport=transport,
         )
-        if check and proc.returncode != 0:
-            raise GitHubError(f"gh {' '.join(args[:3])} failed: {proc.stderr.strip()}")
-        return proc
+        self._login: str | None = None
+
+    def _request(self, method: str, url: str, ok: tuple[int, ...] = (), **kwargs) -> httpx.Response:
+        """Send a request; raise GitHubError on failure unless the status is listed in `ok`."""
+        try:
+            resp = self._http.request(method, url, **kwargs)
+        except httpx.HTTPError as e:
+            raise GitHubError(f"{method} {url} failed: {e}") from e
+        if resp.is_success or resp.status_code in ok:
+            return resp
+        try:
+            detail = resp.json().get("message", "")
+        except ValueError:
+            detail = resp.text[:200]
+        raise GitHubError(
+            f"{method} {url} failed: HTTP {resp.status_code} {detail}".rstrip(), resp.status_code
+        )
+
+    def _paginate(self, url: str) -> list[dict]:
+        items: list[dict] = []
+        next_url: str | None = url
+        while next_url:
+            resp = self._request("GET", next_url)
+            items += resp.json()
+            next_url = resp.links.get("next", {}).get("url")
+        return items
 
     def login(self) -> str:
-        return self._run("api", "user", "--jq", ".login").stdout.strip()
+        if self._login is None:
+            self._login = self._request("GET", "/user").json()["login"]
+        return self._login
 
     def resolve_repo(self, repo: str) -> str:
         return repo if "/" in repo else f"{self.login()}/{repo}"
@@ -35,19 +67,22 @@ class GitHub:
     def ensure_repo(self, repo: str) -> str:
         """Make sure a private, non-empty repo exists; return its full name."""
         full = self.resolve_repo(repo)
-        proc = self._run("repo", "view", full, "--json", "isPrivate,isEmpty", check=False)
-        if proc.returncode == 0:
-            info = json.loads(proc.stdout)
-            if not info["isPrivate"]:
-                raise GitHubError(f"repository {full} is public, refusing to back up into it")
-            if info["isEmpty"]:
-                self._init_commit(full)
-        elif "Could not resolve to a Repository" in proc.stderr:
-            self._run("repo", "create", full, "--private")
+        resp = self._request("GET", f"/repos/{full}", ok=(404,))
+        if resp.status_code == 404:
+            owner, name = full.split("/", 1)
+            url = "/user/repos" if owner == self.login() else f"/orgs/{owner}/repos"
+            self._request("POST", url, json={"name": name, "private": True})
             self._init_commit(full)
-        else:
-            raise GitHubError(f"gh repo view {full} failed: {proc.stderr.strip()}")
+        elif not resp.json()["private"]:
+            raise GitHubError(f"repository {full} is public, refusing to back up into it")
+        elif self._is_empty(full):
+            self._init_commit(full)
         return full
+
+    def _is_empty(self, full: str) -> bool:
+        # the repo object has no such flag; listing commits of an empty repo answers 409
+        resp = self._request("GET", f"/repos/{full}/commits", ok=(409,), params={"per_page": 1})
+        return resp.status_code == 409
 
     def _init_commit(self, full: str) -> None:
         """Seed a descriptive README; a release needs a tag, a tag needs a commit."""
@@ -57,7 +92,7 @@ class GitHub:
                 self.write_file(full, "README.md", text, "Initial commit")
                 return
             except GitHubError as e:
-                if attempt == 2 or "HTTP 401" in str(e) or "HTTP 403" in str(e):
+                if attempt == 2 or e.status in (401, 403):
                     raise
                 time.sleep(2)  # a just-created repository is occasionally not writable yet
                 # the failed attempt may have been applied on the server
@@ -65,34 +100,24 @@ class GitHub:
                     return
 
     def list_releases(self, full: str) -> list[dict]:
-        out = self._run(
-            "release", "list", "--repo", full, "--limit", "1000",
-            "--json", "tagName,isDraft",
-        ).stdout  # fmt: skip
-        return json.loads(out)
-
-    def list_release_details(self, full: str) -> list[dict]:
-        """Published releases with their assets (REST shape)."""
-        out = self._run(
-            "api", "--paginate", "--slurp", f"repos/{full}/releases?per_page=100"
-        ).stdout
-        return [r for page in json.loads(out) for r in page if not r["draft"]]
+        """All releases including drafts (REST shape: tag_name, draft, assets, ...)."""
+        return self._paginate(f"/repos/{full}/releases?per_page=100")
 
     def read_file(self, full: str, path: str) -> tuple[str, str] | None:
         """Return (text, blob sha) of a file in the default branch, or None if missing."""
-        proc = self._run("api", f"repos/{full}/contents/{path}", check=False)
-        if proc.returncode != 0:
-            if "HTTP 404" in proc.stderr:
-                return None
-            raise GitHubError(f"gh api contents/{path} failed: {proc.stderr.strip()}")
-        data = json.loads(proc.stdout)
+        resp = self._request("GET", f"/repos/{full}/contents/{path}", ok=(404,))
+        if resp.status_code == 404:
+            return None
+        data = resp.json()
         if data.get("encoding") == "base64":
             return base64.b64decode(data["content"]).decode(), data["sha"]
         # files over 1 MB come without content; an empty text here would wipe the file
-        raw = self._run(
-            "api", "-H", "Accept: application/vnd.github.raw", f"repos/{full}/contents/{path}"
-        ).stdout
-        return raw, data["sha"]
+        raw = self._request(
+            "GET",
+            f"/repos/{full}/contents/{path}",
+            headers={"Accept": "application/vnd.github.raw"},
+        )
+        return raw.text, data["sha"]
 
     def write_file(
         self, full: str, path: str, text: str, message: str, sha: str | None = None
@@ -100,27 +125,58 @@ class GitHub:
         body = {"message": message, "content": base64.b64encode(text.encode()).decode()}
         if sha:
             body["sha"] = sha
-        # via stdin: Linux caps a single command-line argument at 128 KB
-        self._run(
-            "api", "-X", "PUT", f"repos/{full}/contents/{path}", "--input", "-",
-            stdin=json.dumps(body),
-        )  # fmt: skip
+        self._request("PUT", f"/repos/{full}/contents/{path}", json=body)
 
-    def delete_release(self, full: str, tag: str) -> None:
-        self._run("release", "delete", tag, "--repo", full, "--yes", "--cleanup-tag")
+    def delete_release(self, full: str, release: dict) -> None:
+        """Delete a release and, unless it is a draft, its tag."""
+        self._request("DELETE", f"/repos/{full}/releases/{release['id']}", ok=(404,))
+        # a draft has no tag yet; its tag_name may even belong to someone else's tag
+        if not release["draft"]:
+            self._request(
+                "DELETE", f"/repos/{full}/git/refs/tags/{release['tag_name']}", ok=(404, 422)
+            )
+
+    def _release_by_tag(self, full: str, tag: str) -> dict:
+        return self._request("GET", f"/repos/{full}/releases/tags/{tag}").json()
 
     def release_notes(self, full: str, tag: str) -> str:
-        return self._run(
-            "release", "view", tag, "--repo", full, "--json", "body", "--jq", ".body"
-        ).stdout
+        return self._release_by_tag(full, tag)["body"] or ""
 
     def download_release(self, full: str, tag: str, dest: Path) -> None:
-        self._run("release", "download", tag, "--repo", full, "--dir", str(dest))
+        for asset in self._release_by_tag(full, tag)["assets"]:
+            target = dest / Path(asset["name"]).name
+            url = f"/repos/{full}/releases/assets/{asset['id']}"
+            headers = {"Accept": "application/octet-stream"}
+            try:
+                with self._http.stream("GET", url, headers=headers) as resp, target.open("wb") as f:
+                    if not resp.is_success:
+                        raise GitHubError(
+                            f"download of {asset['name']} failed: HTTP {resp.status_code}",
+                            resp.status_code,
+                        )
+                    for chunk in resp.iter_bytes():
+                        f.write(chunk)
+            except httpx.HTTPError as e:
+                raise GitHubError(f"download of {asset['name']} failed: {e}") from e
 
     def create_release(self, full: str, tag: str, notes: str, assets: list[Path]) -> None:
         """Upload as a draft and publish only when all assets are in place."""
-        self._run(
-            "release", "create", tag, *map(str, assets),
-            "--repo", full, "--title", tag, "--notes", notes, "--draft",
-        )  # fmt: skip
-        self._run("release", "edit", tag, "--repo", full, "--draft=false")
+        release = self._request(
+            "POST",
+            f"/repos/{full}/releases",
+            json={"tag_name": tag, "name": tag, "body": notes, "draft": True},
+        ).json()
+        upload_url = release["upload_url"].split("{", 1)[0]
+        for asset in assets:
+            with asset.open("rb") as f:
+                self._request(
+                    "POST",
+                    upload_url,
+                    params={"name": asset.name},
+                    headers={
+                        "Content-Type": "application/octet-stream",
+                        "Content-Length": str(asset.stat().st_size),
+                    },
+                    content=f,
+                )
+        self._request("PATCH", f"/repos/{full}/releases/{release['id']}", json={"draft": False})

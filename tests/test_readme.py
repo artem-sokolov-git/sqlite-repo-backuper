@@ -4,6 +4,7 @@ from sqlite_repo_backuper.readme import END, START, apply_section, render_sectio
 def _release(tag, *assets):
     return {
         "tag_name": tag,
+        "draft": False,
         "html_url": f"https://github.com/o/r/releases/tag/{tag}",
         "assets": [
             {"name": n, "size": s, "browser_download_url": f"https://dl/{tag}/{n}"}
@@ -66,8 +67,9 @@ class FakeGitHub:
         self.readme = readme
         self.writes = []
 
-    def list_release_details(self, repo):
-        return [_release("backup-2026-10-13T03-00-00Z", ("app.db-y.gz", 100))]
+    def list_releases(self, repo):
+        draft = {**_release("backup-2026-10-14T03-00-00Z"), "draft": True}
+        return [_release("backup-2026-10-13T03-00-00Z", ("app.db-y.gz", 100)), draft]
 
     def read_file(self, repo, path):
         return self.readme
@@ -82,6 +84,7 @@ def test_update_index_writes_with_sha_then_is_idempotent():
     path, text, sha = gh.writes[0]
     assert (path, sha) == ("README.md", "abc123")
     assert text.startswith("# repo\n\n" + START)
+    assert "2026-10-14" not in text  # drafts are not listed
 
     gh2 = FakeGitHub((text, "def456"))
     assert update_index(gh2, "o/r") is False

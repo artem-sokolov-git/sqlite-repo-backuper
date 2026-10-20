@@ -104,7 +104,7 @@ def apply_section(existing: str, section: str) -> str:
 
 def update_index(gh: GitHub, repo: str) -> bool:
     """Refresh the backup list in the repo README; return False if nothing changed."""
-    section = render_section(gh.list_release_details(repo))
+    section = render_section([r for r in gh.list_releases(repo) if not r["draft"]])
     current = gh.read_file(repo, README)
     text, sha = current if current else ("", None)
     updated = apply_section(text, section)

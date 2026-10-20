@@ -26,8 +26,10 @@ Entry point is `cli.py` (subcommands `run`, `backup`, `prune`, `list`, `restore`
 Configuration is env-only (`config.py`); every variable also accepts a `<NAME>_FILE` variant for
 Docker secrets, except `HEALTH_FILE`.
 
-GitHub is reached exclusively by shelling out to the `gh` CLI (`github.py`, token passed via the
-`GH_TOKEN` env of the subprocess). There is no REST client and no git checkout.
+GitHub is reached only through the REST API with a small `httpx` client (`github.py`); there is
+no `gh` CLI, no GitHub SDK and no git checkout. Failures are `GitHubError` with an HTTP `status`.
+Releases are passed around in the REST shape (`tag_name`, `draft`, `id`, `assets`). Release assets
+are downloaded via a redirect to another host, and httpx drops the token on it.
 
 **Storage model: one GitHub Release per backup**, tag `backup-<UTC %Y-%m-%dT%H-%M-%SZ>`, one asset
 per database. Not commits: git history would grow forever, while deleting a release frees space.
@@ -63,8 +65,8 @@ health file stores a deadline (next run + 1h) and is advanced only after a succe
 
 ## Testing notes
 
-- Tests never talk to GitHub. `tests/test_github.py` fakes `subprocess.run` to check the `gh`
-  arguments, but the real API behaviour of `github.py`, `ensure_repo` and the release flow is
+- Tests never talk to GitHub. `tests/test_github.py` runs `GitHub` against an
+  `httpx.MockTransport` to check the requests, but the real API behaviour of `github.py`, `ensure_repo` and the release flow is
   verified only manually against a real private repo; do that after touching them.
 - `age`-dependent tests are skipped when the `age` binary is not installed locally.
 - A token scoped to a single repository cannot create repositories (`Resource not accessible by
@@ -73,10 +75,9 @@ health file stores a deadline (next run + 1h) and is advanced only after a succe
 
 ## Docker image
 
-`gh` and `age` are installed as static binaries on separate build stages, not via apt (the Debian
-`gh` package depends on `git`/`perl` and adds ~110 MB). Versions are pinned by `ARG`; `gh` is
-checked against the release checksums file, but `age` publishes none, so its per-arch sha256 is
-hardcoded in the `Dockerfile` and must be recomputed when bumping `AGE_VERSION`.
+`age` is installed as a static binary on a separate build stage, not via apt. Its version is
+pinned by `ARG`; `age` publishes no checksums file, so its per-arch sha256 is hardcoded in the
+`Dockerfile` and must be recomputed when bumping `AGE_VERSION`.
 The container runs as uid 1000; the database volume must be mounted read-write (SQLite needs the
 `-wal`/`-shm` files).
 
